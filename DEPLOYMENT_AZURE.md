@@ -19,6 +19,7 @@ Set these application settings in App Service:
 - `RAS_AUTH_SESSION_MINUTES=60`
 - `RAS_SSO_CLIENT_ID`
 - `RAS_SSO_TENANT_ID`
+- `RAS_SSO_REDIRECT_URI`
 - `RAS_SSO_ALLOWED_DOMAIN`
 - `RAS_SSO_SCOPES=User.Read`
 - `RAS_SP_TENANT_ID`
@@ -39,6 +40,11 @@ Repository or environment secrets:
 1. Push to `main` for CI validation.
 2. Trigger workflow `deploy-azure-appservice` manually for first release.
 3. Validate app URL, sign-in, and SharePoint data sync.
+
+Microsoft Entra ID setup for browser login:
+- Create or use an App Registration for this dashboard.
+- Add a Web redirect URI matching the deployed app URL.
+- Set `RAS_SSO_CLIENT_ID` to that app registration's client ID.
 
 ## 6. Post-deploy checks
 1. Verify only organization users can sign in.

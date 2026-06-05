@@ -60,9 +60,7 @@ DATA_SOURCE_MODE = os.getenv("RAS_DATA_SOURCE", "local").strip().lower()
 AUTH_MODE = os.getenv("RAS_AUTH_MODE", "sso").strip().lower()
 AUTH_SESSION_MINUTES = int(os.getenv("RAS_AUTH_SESSION_MINUTES", "60"))
 SSO_TENANT_ID = os.getenv("RAS_SSO_TENANT_ID", "organizations")
-# Default to Microsoft's first-party Azure CLI public client so hosted apps can
-# still enforce sign-in when custom app registration secrets are not set yet.
-SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "04b07795-8ddb-461a-bbee-02f9e1bf7b46")
+SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "").strip()
 SSO_REDIRECT_URI = os.getenv("RAS_SSO_REDIRECT_URI", "https://revenue-analysis-rasi-0605.streamlit.app/").strip()
 SSO_ALLOWED_DOMAIN = os.getenv("RAS_SSO_ALLOWED_DOMAIN", "rcgglobalservices.com").strip().lower()
 SSO_SCOPES = [scope.strip() for scope in os.getenv("RAS_SSO_SCOPES", "User.Read").split(",") if scope.strip()]
@@ -151,7 +149,10 @@ def _render_sso_login_gate() -> bool:
     st.info("Please sign in with your organizational Microsoft account to access this dashboard.")
 
     if not SSO_CLIENT_ID:
-        st.error("SSO is enabled but RAS_SSO_CLIENT_ID is not configured.")
+        st.error(
+            "SSO is enabled but RAS_SSO_CLIENT_ID is not configured. "
+            "Browser login requires your Azure App Registration client ID."
+        )
         return False
 
     if not SSO_REDIRECT_URI:
@@ -193,7 +194,10 @@ def _render_sso_login_gate() -> bool:
 
         auth_uri = flow.get("auth_uri")
         if not auth_uri:
-            st.error("Unable to start Microsoft sign-in. Please verify app registration settings.")
+            st.error(
+                "Unable to start Microsoft sign-in. Verify the Azure App Registration client ID "
+                "and that the redirect URI is registered in Microsoft Entra ID."
+            )
             return False
 
         st.link_button("Sign in with Microsoft", auth_uri, type="primary", use_container_width=True)

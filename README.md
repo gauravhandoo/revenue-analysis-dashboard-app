@@ -42,6 +42,7 @@ You can enable Microsoft organizational SSO directly in the app.
 Current behavior:
 - SSO is required at launch.
 - Access is restricted to the domain set in `RAS_SSO_ALLOWED_DOMAIN`.
+- Browser login requires your own Azure App Registration and a registered redirect URI.
 
 1. Set environment variables before launch:
   - `RAS_AUTH_MODE=sso`
@@ -53,6 +54,11 @@ Current behavior:
   - Optional: `RAS_SSO_SCOPES=User.Read`
 2. Launch the app.
 3. Users sign in directly in the browser using Microsoft login before any revenue data is loaded.
+
+Azure App Registration requirements for browser login:
+- Platform: Web
+- Redirect URI: `https://revenue-analysis-rasi-0605.streamlit.app/`
+- The deployed app's `RAS_SSO_CLIENT_ID` must match that registration.
 
 To disable auth for local testing:
 - `RAS_AUTH_MODE=none`
