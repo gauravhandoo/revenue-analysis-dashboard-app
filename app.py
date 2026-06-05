@@ -5,6 +5,7 @@ import json
 import hashlib
 import hmac
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -60,7 +61,7 @@ PCT_COLUMNS = ["target_gm_pct", "gm_month_pct", "gm_ytd_pct", "gm_jtd_pct"]
 METRIC_CHOICES = ["GM%", "Revenue", "Cost"]
 WINDOW_CHOICES = ["Last 3 months", "Last 6 months", "Last 12 months", "All months"]
 APP_CACHE_VERSION = "2026-05-22-1"
-DATA_SOURCE_MODE = os.getenv("RAS_DATA_SOURCE", "local").strip().lower()
+DATA_SOURCE_MODE = os.getenv("RAS_DATA_SOURCE", "upload").strip().lower()
 AUTH_MODE = os.getenv("RAS_AUTH_MODE", "sso").strip().lower()
 AUTH_SESSION_MINUTES = int(os.getenv("RAS_AUTH_SESSION_MINUTES", "60"))
 CREDENTIALS_ALLOWED_DOMAIN = os.getenv("RAS_AUTH_ALLOWED_DOMAIN", "myridius.com").strip().lower()
@@ -441,6 +442,27 @@ def resolve_sharepoint_mirror(cache_version: str):
     return mirror_sharepoint_files(config)
 
 
+def load_uploaded_data(monthly_files, template_upload):
+    with tempfile.TemporaryDirectory(prefix="revenue-upload-") as tmp_dir:
+        root = Path(tmp_dir)
+        monthly_dir = root / "monthly"
+        monthly_dir.mkdir(parents=True, exist_ok=True)
+
+        for uploaded in monthly_files:
+            if not getattr(uploaded, "name", "").lower().endswith(".xlsx"):
+                continue
+            (monthly_dir / uploaded.name).write_bytes(uploaded.getvalue())
+
+        template_path = root / template_upload.name
+        template_path.write_bytes(template_upload.getvalue())
+
+        revenue_data = load_revenue_files(monthly_dir)
+        master_data = load_master_projects(template_path)
+        merged = merge_with_master(revenue_data, master_data)
+        snapshot = build_project_snapshot(merged)
+        return merged, snapshot, len(revenue_data), len(master_data)
+
+
 def _format_for_display(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     for col in CURRENCY_COLUMNS:
@@ -582,6 +604,7 @@ def main():
     defaults = _find_default_paths()
     data_folder = str(defaults.data_folder)
     template_file = str(defaults.template_file)
+    effective_data_mode = DATA_SOURCE_MODE
 
     with st.sidebar:
         st.header("Access")
@@ -591,7 +614,7 @@ def main():
             st.rerun()
 
         st.header("Data Source")
-        st.caption("Source files and template are fixed by deployment configuration.")
+        st.caption("Configured source mode: SharePoint, upload, or local.")
 
         if st.button("Refresh Data", use_container_width=True):
             load_all_data.clear()
@@ -604,13 +627,37 @@ def main():
             data_folder = str(mirror_result.data_folder)
             template_file = str(mirror_result.template_file)
         except DataSourceError as exc:
-            st.error(str(exc))
-            st.stop()
+            effective_data_mode = "upload"
+            st.warning(
+                "SharePoint configuration is unavailable. "
+                "Switching to upload mode for this session."
+            )
+            st.caption(str(exc))
         except Exception as exc:
             st.error(f"Unexpected SharePoint sync error: {exc}")
             st.stop()
 
-    merged, snapshot, revenue_count, master_count = load_all_data(data_folder, template_file, APP_CACHE_VERSION)
+    if effective_data_mode == "upload":
+        st.subheader("Upload Source Files")
+        uploaded_monthly = st.file_uploader(
+            "Monthly files (Solutions_Revenue_<Month>_<Year>*.xlsx)",
+            type=["xlsx"],
+            accept_multiple_files=True,
+        )
+        uploaded_template = st.file_uploader(
+            "Template file",
+            type=["xlsx"],
+            accept_multiple_files=False,
+            key="template_upload",
+        )
+
+        if not uploaded_monthly or uploaded_template is None:
+            st.info("Upload monthly files and the template file to load results.")
+            st.stop()
+
+        merged, snapshot, revenue_count, master_count = load_uploaded_data(uploaded_monthly, uploaded_template)
+    else:
+        merged, snapshot, revenue_count, master_count = load_all_data(data_folder, template_file, APP_CACHE_VERSION)
 
     if merged.empty:
         if revenue_count == 0:
