@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import json
 import hashlib
 import hmac
@@ -192,7 +193,7 @@ def _get_credentials_store() -> dict[str, str]:
     except Exception:
         secret_credentials = {}
 
-    if isinstance(secret_credentials, dict):
+    if isinstance(secret_credentials, Mapping):
         for email, password_hash in secret_credentials.items():
             if isinstance(email, str) and isinstance(password_hash, str):
                 credentials[email.strip().lower()] = password_hash.strip()
