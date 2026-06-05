@@ -39,6 +39,10 @@ You can override both paths in the app sidebar.
 ## Security layer (optional SSO)
 You can enable Microsoft organizational SSO directly in the app.
 
+Current behavior:
+- SSO is required at launch.
+- Access is restricted to the domain set in `RAS_SSO_ALLOWED_DOMAIN`.
+
 1. Set environment variables before launch:
   - `RAS_AUTH_MODE=sso`
   - `RAS_SSO_CLIENT_ID=<Azure App Registration Client ID>`
@@ -56,10 +60,10 @@ To disable auth for local testing:
 The app supports two source modes.
 
 1. `RAS_DATA_SOURCE=local` (default)
-  - Uses local folder and template file paths from the sidebar.
+  - Uses deployment default folder and template paths.
 2. `RAS_DATA_SOURCE=sharepoint`
   - Pulls monthly files and template from SharePoint through Microsoft Graph.
-  - Sidebar source fields become read-only and reflect environment configuration.
+  - Source and template paths are fixed by environment configuration.
 
 ### Required variables for SharePoint mode
 - `RAS_SP_TENANT_ID`

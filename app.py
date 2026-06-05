@@ -57,7 +57,7 @@ METRIC_CHOICES = ["GM%", "Revenue", "Cost"]
 WINDOW_CHOICES = ["Last 3 months", "Last 6 months", "Last 12 months", "All months"]
 APP_CACHE_VERSION = "2026-05-22-1"
 DATA_SOURCE_MODE = os.getenv("RAS_DATA_SOURCE", "local").strip().lower()
-AUTH_MODE = os.getenv("RAS_AUTH_MODE", "none").strip().lower()
+AUTH_MODE = os.getenv("RAS_AUTH_MODE", "sso").strip().lower()
 AUTH_SESSION_MINUTES = int(os.getenv("RAS_AUTH_SESSION_MINUTES", "60"))
 SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "")
 SSO_TENANT_ID = os.getenv("RAS_SSO_TENANT_ID", "organizations")
@@ -203,11 +203,12 @@ def _render_sso_login_gate() -> bool:
 
 
 def _enforce_authentication() -> bool:
-    if AUTH_MODE == "none":
-        return True
-
     if AUTH_MODE != "sso":
-        st.error("Unsupported auth mode. Set RAS_AUTH_MODE to 'none' or 'sso'.")
+        st.error("Unsupported auth mode. Set RAS_AUTH_MODE to 'sso'.")
+        return False
+
+    if not SSO_ALLOWED_DOMAIN:
+        st.error("RAS_SSO_ALLOWED_DOMAIN must be configured to enforce organization-only access.")
         return False
 
     if _is_authenticated():
@@ -375,27 +376,14 @@ def main():
     template_file = str(defaults.template_file)
 
     with st.sidebar:
-        if AUTH_MODE == "sso":
-            st.header("Access")
-            st.write(f"Signed in as: {st.session_state.get('auth_email', '')}")
-            if st.button("Logout", use_container_width=True):
-                _logout_user()
-                st.rerun()
+        st.header("Access")
+        st.write(f"Signed in as: {st.session_state.get('auth_email', '')}")
+        if st.button("Logout", use_container_width=True):
+            _logout_user()
+            st.rerun()
 
         st.header("Data Source")
-        if DATA_SOURCE_MODE == "sharepoint":
-            st.caption("Hosted mode: files are fetched from SharePoint via Microsoft Graph.")
-            site_id = os.getenv("RAS_SP_SITE_ID", "")
-            drive_id = os.getenv("RAS_SP_DRIVE_ID", "")
-            folder_path = os.getenv("RAS_SP_FOLDER_PATH", "")
-            template_name = os.getenv("RAS_SP_TEMPLATE_FILE", "Revenue Output Dashboard Sample.xlsx")
-            st.text_input("SharePoint Site ID", value=site_id, disabled=True)
-            st.text_input("SharePoint Drive ID", value=drive_id, disabled=True)
-            st.text_input("SharePoint Folder Path", value=folder_path, disabled=True)
-            st.text_input("Template File", value=template_name, disabled=True)
-        else:
-            data_folder = st.text_input("Monthly files folder", value=str(defaults.data_folder))
-            template_file = st.text_input("Template file", value=str(defaults.template_file))
+        st.caption("Source files and template are fixed by deployment configuration.")
 
         if st.button("Refresh Data", use_container_width=True):
             load_all_data.clear()
