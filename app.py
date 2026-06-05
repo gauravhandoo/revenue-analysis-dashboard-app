@@ -59,9 +59,11 @@ APP_CACHE_VERSION = "2026-05-22-1"
 DATA_SOURCE_MODE = os.getenv("RAS_DATA_SOURCE", "local").strip().lower()
 AUTH_MODE = os.getenv("RAS_AUTH_MODE", "sso").strip().lower()
 AUTH_SESSION_MINUTES = int(os.getenv("RAS_AUTH_SESSION_MINUTES", "60"))
-SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "")
 SSO_TENANT_ID = os.getenv("RAS_SSO_TENANT_ID", "organizations")
-SSO_ALLOWED_DOMAIN = os.getenv("RAS_SSO_ALLOWED_DOMAIN", "").strip().lower()
+# Default to Microsoft's first-party Azure CLI public client so hosted apps can
+# still enforce sign-in when custom app registration secrets are not set yet.
+SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "04b07795-8ddb-461a-bbee-02f9e1bf7b46")
+SSO_ALLOWED_DOMAIN = os.getenv("RAS_SSO_ALLOWED_DOMAIN", "rcgglobalservices.com").strip().lower()
 SSO_SCOPES = [scope.strip() for scope in os.getenv("RAS_SSO_SCOPES", "User.Read").split(",") if scope.strip()]
 
 FRIENDLY_HEADERS = {
@@ -123,7 +125,7 @@ def _logout_user() -> None:
     ]:
         if key in st.session_state:
             del st.session_state[key]
-
+            return False
 
 def _build_sso_app() -> msal.PublicClientApplication:
     authority = f"https://login.microsoftonline.com/{SSO_TENANT_ID}"
