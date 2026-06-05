@@ -20,6 +20,25 @@ st.set_page_config(
 )
 
 
+def _bootstrap_runtime_env() -> None:
+    # Streamlit Cloud stores values in st.secrets; mirror RAS_* keys into env.
+    try:
+        secret_items = dict(st.secrets)
+    except Exception:
+        return
+
+    for key, value in secret_items.items():
+        if not str(key).startswith("RAS_"):
+            continue
+        if key in os.environ:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            os.environ[str(key)] = str(value)
+
+
+_bootstrap_runtime_env()
+
+
 CURRENCY_COLUMNS = [
     "rev_month",
     "cost_month",

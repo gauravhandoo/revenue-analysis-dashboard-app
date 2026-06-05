@@ -82,6 +82,15 @@ Automation helper:
 - Run `scripts/bootstrap_github_repo.ps1 -Org Myridius-India -Repo revenue-analysis-dashboard -Push`
 - Prerequisite: GitHub CLI (`gh`) installed and authenticated with org repo-create permission.
 
+## Streamlit Cloud deployment (Git-based)
+1. Go to Streamlit Community Cloud and create a new app from GitHub repo `Myridius-India/revenue-analysis-dashboard`.
+2. Set entry file to `app.py`.
+3. In app Secrets, add all `RAS_*` keys from `.env.example`.
+4. Deploy and test sign-in + data refresh.
+
+Note:
+- The app mirrors `RAS_*` values from Streamlit Secrets into environment variables automatically at startup.
+
 ## Output behavior
 - Sorted by `Customer Name` (A-Z)
 - Account-level summary is selected by default
