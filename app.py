@@ -122,7 +122,6 @@ def _logout_user() -> None:
         "auth_email",
         "auth_name",
         "auth_expires_at",
-        "sso_device_flow",
         "sso_auth_code_flow",
     ]:
         if key in st.session_state:
@@ -130,7 +129,7 @@ def _logout_user() -> None:
 
 
 def _clear_auth_session() -> None:
-    # Keep in-progress device flow intact between reruns.
+    # Keep in-progress browser auth flow intact between reruns.
     for key in ["auth_ok", "auth_email", "auth_name", "auth_expires_at"]:
         st.session_state.pop(key, None)
 
@@ -226,7 +225,6 @@ def _render_sso_login_gate() -> bool:
     st.session_state["auth_email"] = email
     st.session_state["auth_name"] = name
     st.session_state["auth_expires_at"] = time.time() + (AUTH_SESSION_MINUTES * 60)
-    st.session_state.pop("sso_device_flow", None)
     st.success(f"Signed in as {email}")
     st.rerun()
     return False
