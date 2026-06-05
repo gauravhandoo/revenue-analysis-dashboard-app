@@ -125,7 +125,12 @@ def _logout_user() -> None:
     ]:
         if key in st.session_state:
             del st.session_state[key]
-            return False
+
+
+def _clear_auth_session() -> None:
+    # Keep in-progress device flow intact between reruns.
+    for key in ["auth_ok", "auth_email", "auth_name", "auth_expires_at"]:
+        st.session_state.pop(key, None)
 
 def _build_sso_app() -> msal.PublicClientApplication:
     authority = f"https://login.microsoftonline.com/{SSO_TENANT_ID}"
@@ -216,7 +221,7 @@ def _enforce_authentication() -> bool:
     if _is_authenticated():
         return True
 
-    _logout_user()
+    _clear_auth_session()
     return _render_sso_login_gate()
 
 
