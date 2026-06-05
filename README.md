@@ -42,10 +42,12 @@ You can enable Microsoft organizational SSO directly in the app.
 Current behavior:
 - SSO is required at launch.
 - Access is restricted to the domain set in `RAS_SSO_ALLOWED_DOMAIN`.
-- Browser login requires your own Azure App Registration and a registered redirect URI.
+- The app uses browser login when a tenant-managed Azure App Registration is configured.
+- If no browser SSO client ID is configured, the app falls back to Microsoft device sign-in.
 
 1. Set environment variables before launch:
   - `RAS_AUTH_MODE=sso`
+  - Optional: `RAS_SSO_FLOW_MODE=auto|browser|device` (default: `auto`)
   - `RAS_SSO_CLIENT_ID=<Azure App Registration Client ID>`
   - `RAS_SSO_TENANT_ID=<tenant id or organizations>`
   - `RAS_SSO_REDIRECT_URI=<app url registered in Azure, e.g. https://revenue-analysis-rasi-0605.streamlit.app/>`
@@ -53,7 +55,8 @@ Current behavior:
   - `RAS_AUTH_SESSION_MINUTES=60`
   - Optional: `RAS_SSO_SCOPES=User.Read`
 2. Launch the app.
-3. Users sign in directly in the browser using Microsoft login before any revenue data is loaded.
+3. Users sign in directly in the browser when browser SSO is configured.
+4. If browser SSO is not configured, users complete Microsoft device sign-in before any revenue data is loaded.
 
 Azure App Registration requirements for browser login:
 - Platform: Web

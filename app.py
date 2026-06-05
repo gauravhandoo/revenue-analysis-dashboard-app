@@ -60,8 +60,10 @@ DATA_SOURCE_MODE = os.getenv("RAS_DATA_SOURCE", "local").strip().lower()
 AUTH_MODE = os.getenv("RAS_AUTH_MODE", "sso").strip().lower()
 AUTH_SESSION_MINUTES = int(os.getenv("RAS_AUTH_SESSION_MINUTES", "60"))
 SSO_TENANT_ID = os.getenv("RAS_SSO_TENANT_ID", "organizations")
+SSO_FLOW_MODE = os.getenv("RAS_SSO_FLOW_MODE", "auto").strip().lower()
 SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "").strip()
 SSO_REDIRECT_URI = os.getenv("RAS_SSO_REDIRECT_URI", "https://revenue-analysis-rasi-0605.streamlit.app/").strip()
+SSO_DEVICE_CLIENT_ID = os.getenv("RAS_SSO_DEVICE_CLIENT_ID", "04b07795-8ddb-461a-bbee-02f9e1bf7b46").strip()
 SSO_ALLOWED_DOMAIN = os.getenv("RAS_SSO_ALLOWED_DOMAIN", "rcgglobalservices.com").strip().lower()
 SSO_SCOPES = [scope.strip() for scope in os.getenv("RAS_SSO_SCOPES", "User.Read").split(",") if scope.strip()]
 
@@ -121,19 +123,26 @@ def _logout_user() -> None:
         "auth_name",
         "auth_expires_at",
         "sso_auth_code_flow",
+        "sso_device_flow",
     ]:
         if key in st.session_state:
             del st.session_state[key]
 
 
 def _clear_auth_session() -> None:
-    # Keep in-progress browser auth flow intact between reruns.
+    # Keep in-progress auth flow intact between reruns.
     for key in ["auth_ok", "auth_email", "auth_name", "auth_expires_at"]:
         st.session_state.pop(key, None)
 
-def _build_sso_app() -> msal.PublicClientApplication:
+def _build_sso_app(client_id: str) -> msal.PublicClientApplication:
     authority = f"https://login.microsoftonline.com/{SSO_TENANT_ID}"
-    return msal.PublicClientApplication(client_id=SSO_CLIENT_ID, authority=authority)
+    return msal.PublicClientApplication(client_id=client_id, authority=authority)
+
+
+def _selected_sso_flow_mode() -> str:
+    if SSO_FLOW_MODE in {"browser", "device"}:
+        return SSO_FLOW_MODE
+    return "browser" if SSO_CLIENT_ID else "device"
 
 
 def _extract_claim(claims: dict, *keys: str) -> str:
@@ -144,14 +153,39 @@ def _extract_claim(claims: dict, *keys: str) -> str:
     return ""
 
 
-def _render_sso_login_gate() -> bool:
-    st.subheader("Sign-in Required")
-    st.info("Please sign in with your organizational Microsoft account to access this dashboard.")
+def _complete_sso_result(result: dict) -> bool:
+    if "access_token" not in result:
+        description = result.get("error_description", "Sign-in was not completed.")
+        st.error(f"Sign-in failed: {description}")
+        return False
 
+    claims = result.get("id_token_claims", {})
+    email = _extract_claim(claims, "preferred_username", "email", "upn").strip().lower()
+    name = _extract_claim(claims, "name", "preferred_username", "upn") or "User"
+
+    if not email:
+        st.error("SSO succeeded, but no organizational email claim was returned.")
+        return False
+
+    if SSO_ALLOWED_DOMAIN and not email.endswith(f"@{SSO_ALLOWED_DOMAIN}"):
+        st.error("This account is not part of the allowed organizational domain.")
+        _logout_user()
+        return False
+
+    st.session_state["auth_ok"] = True
+    st.session_state["auth_email"] = email
+    st.session_state["auth_name"] = name
+    st.session_state["auth_expires_at"] = time.time() + (AUTH_SESSION_MINUTES * 60)
+    st.success(f"Signed in as {email}")
+    st.rerun()
+    return False
+
+
+def _render_browser_sso_login_gate() -> bool:
     if not SSO_CLIENT_ID:
         st.error(
-            "SSO is enabled but RAS_SSO_CLIENT_ID is not configured. "
-            "Browser login requires your Azure App Registration client ID."
+            "Browser SSO is enabled but RAS_SSO_CLIENT_ID is not configured. "
+            "Provide your Azure App Registration client ID or switch to device flow."
         )
         return False
 
@@ -159,7 +193,7 @@ def _render_sso_login_gate() -> bool:
         st.error("SSO is enabled but RAS_SSO_REDIRECT_URI is not configured.")
         return False
 
-    app = _build_sso_app()
+    app = _build_sso_app(SSO_CLIENT_ID)
     query_params = dict(st.query_params)
     if "error" in query_params:
         st.error(query_params.get("error_description") or "Microsoft sign-in failed.")
@@ -207,31 +241,56 @@ def _render_sso_login_gate() -> bool:
             st.rerun()
         return False
 
-    if "access_token" not in result:
-        description = result.get("error_description", "Sign-in was not completed.")
-        st.error(f"Sign-in failed: {description}")
+    return _complete_sso_result(result)
+
+
+def _render_device_sso_login_gate() -> bool:
+    if not SSO_DEVICE_CLIENT_ID:
+        st.error("Device SSO is enabled but no public client ID is configured.")
         return False
 
-    claims = result.get("id_token_claims", {})
-    email = _extract_claim(claims, "preferred_username", "email", "upn").strip().lower()
-    name = _extract_claim(claims, "name", "preferred_username", "upn") or "User"
+    st.caption("Browser SSO is not configured for this deployment. Falling back to Microsoft device sign-in.")
 
-    if not email:
-        st.error("SSO succeeded, but no organizational email claim was returned.")
+    app = _build_sso_app(SSO_DEVICE_CLIENT_ID)
+    flow = st.session_state.get("sso_device_flow")
+
+    if not flow:
+        if st.button("Start Microsoft SSO", type="primary", use_container_width=True):
+            flow = app.initiate_device_flow(scopes=SSO_SCOPES)
+            if "user_code" not in flow:
+                st.error("Unable to start Microsoft sign-in. Please try again later.")
+                return False
+            st.session_state["sso_device_flow"] = flow
+            st.rerun()
         return False
 
-    if SSO_ALLOWED_DOMAIN and not email.endswith(f"@{SSO_ALLOWED_DOMAIN}"):
-        st.error("This account is not part of the allowed organizational domain.")
-        _logout_user()
+    st.code(flow.get("message", "Open https://microsoft.com/devicelogin and complete sign-in."), language="text")
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        completed = st.button("I Completed Sign-In", type="primary", use_container_width=True)
+    with c2:
+        reset = st.button("Reset", use_container_width=True)
+
+    if reset:
+        st.session_state.pop("sso_device_flow", None)
+        st.rerun()
+
+    if not completed:
         return False
 
-    st.session_state["auth_ok"] = True
-    st.session_state["auth_email"] = email
-    st.session_state["auth_name"] = name
-    st.session_state["auth_expires_at"] = time.time() + (AUTH_SESSION_MINUTES * 60)
-    st.success(f"Signed in as {email}")
-    st.rerun()
-    return False
+    result = app.acquire_token_by_device_flow(flow)
+    st.session_state.pop("sso_device_flow", None)
+    return _complete_sso_result(result)
+
+
+def _render_sso_login_gate() -> bool:
+    st.subheader("Sign-in Required")
+    st.info("Please sign in with your organizational Microsoft account to access this dashboard.")
+
+    flow_mode = _selected_sso_flow_mode()
+    if flow_mode == "browser":
+        return _render_browser_sso_login_gate()
+    return _render_device_sso_login_gate()
 
 
 def _enforce_authentication() -> bool:
