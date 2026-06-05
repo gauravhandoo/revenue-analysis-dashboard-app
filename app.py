@@ -63,6 +63,7 @@ SSO_TENANT_ID = os.getenv("RAS_SSO_TENANT_ID", "organizations")
 # Default to Microsoft's first-party Azure CLI public client so hosted apps can
 # still enforce sign-in when custom app registration secrets are not set yet.
 SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "04b07795-8ddb-461a-bbee-02f9e1bf7b46")
+SSO_REDIRECT_URI = os.getenv("RAS_SSO_REDIRECT_URI", "https://revenue-analysis-rasi-0605.streamlit.app/").strip()
 SSO_ALLOWED_DOMAIN = os.getenv("RAS_SSO_ALLOWED_DOMAIN", "rcgglobalservices.com").strip().lower()
 SSO_SCOPES = [scope.strip() for scope in os.getenv("RAS_SSO_SCOPES", "User.Read").split(",") if scope.strip()]
 
@@ -122,6 +123,7 @@ def _logout_user() -> None:
         "auth_name",
         "auth_expires_at",
         "sso_device_flow",
+        "sso_auth_code_flow",
     ]:
         if key in st.session_state:
             del st.session_state[key]
@@ -153,34 +155,55 @@ def _render_sso_login_gate() -> bool:
         st.error("SSO is enabled but RAS_SSO_CLIENT_ID is not configured.")
         return False
 
-    app = _build_sso_app()
-    flow = st.session_state.get("sso_device_flow")
+    if not SSO_REDIRECT_URI:
+        st.error("SSO is enabled but RAS_SSO_REDIRECT_URI is not configured.")
+        return False
 
-    if not flow:
-        if st.button("Start Microsoft SSO", type="primary", use_container_width=True):
-            flow = app.initiate_device_flow(scopes=SSO_SCOPES)
-            if "user_code" not in flow:
-                st.error("Unable to start Microsoft sign-in. Please verify app registration settings.")
-                return False
-            st.session_state["sso_device_flow"] = flow
+    app = _build_sso_app()
+    query_params = dict(st.query_params)
+    if "error" in query_params:
+        st.error(query_params.get("error_description") or "Microsoft sign-in failed.")
+        st.query_params.clear()
+        st.session_state.pop("sso_auth_code_flow", None)
+        return False
+
+    if "code" in query_params:
+        flow = st.session_state.get("sso_auth_code_flow")
+        if not flow:
+            st.warning("Your sign-in session expired. Please start sign-in again.")
+            st.query_params.clear()
+            return False
+        try:
+            result = app.acquire_token_by_auth_code_flow(flow, query_params)
+        except ValueError:
+            st.error("Sign-in validation failed. Please try again.")
+            st.query_params.clear()
+            st.session_state.pop("sso_auth_code_flow", None)
+            return False
+        st.query_params.clear()
+        st.session_state.pop("sso_auth_code_flow", None)
+    else:
+        flow = st.session_state.get("sso_auth_code_flow")
+        if not flow:
+            flow = app.initiate_auth_code_flow(
+                scopes=SSO_SCOPES,
+                redirect_uri=SSO_REDIRECT_URI,
+                prompt="select_account",
+            )
+            st.session_state["sso_auth_code_flow"] = flow
+
+        auth_uri = flow.get("auth_uri")
+        if not auth_uri:
+            st.error("Unable to start Microsoft sign-in. Please verify app registration settings.")
+            return False
+
+        st.link_button("Sign in with Microsoft", auth_uri, type="primary", use_container_width=True)
+        if st.button("Reset Sign-In Session", use_container_width=True):
+            st.session_state.pop("sso_auth_code_flow", None)
+            st.query_params.clear()
             st.rerun()
         return False
 
-    st.code(flow.get("message", "Open https://microsoft.com/devicelogin and complete sign-in."), language="text")
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        completed = st.button("I Completed Sign-In", type="primary", use_container_width=True)
-    with c2:
-        reset = st.button("Reset", use_container_width=True)
-
-    if reset:
-        st.session_state.pop("sso_device_flow", None)
-        st.rerun()
-
-    if not completed:
-        return False
-
-    result = app.acquire_token_by_device_flow(flow)
     if "access_token" not in result:
         description = result.get("error_description", "Sign-in was not completed.")
         st.error(f"Sign-in failed: {description}")

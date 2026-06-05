@@ -47,11 +47,12 @@ Current behavior:
   - `RAS_AUTH_MODE=sso`
   - `RAS_SSO_CLIENT_ID=<Azure App Registration Client ID>`
   - `RAS_SSO_TENANT_ID=<tenant id or organizations>`
+  - `RAS_SSO_REDIRECT_URI=<app url registered in Azure, e.g. https://revenue-analysis-rasi-0605.streamlit.app/>`
   - `RAS_SSO_ALLOWED_DOMAIN=<yourcompany.com>`
   - `RAS_AUTH_SESSION_MINUTES=60`
   - Optional: `RAS_SSO_SCOPES=User.Read`
 2. Launch the app.
-3. Users must complete Microsoft device-code sign-in before any revenue data is loaded.
+3. Users sign in directly in the browser using Microsoft login before any revenue data is loaded.
 
 To disable auth for local testing:
 - `RAS_AUTH_MODE=none`
