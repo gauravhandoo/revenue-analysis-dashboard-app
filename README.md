@@ -39,11 +39,50 @@ You can override both paths in the app sidebar.
 ## Security layer (optional SSO)
 You can enable Microsoft organizational SSO directly in the app.
 
+You can also run the app with built-in credentials auth when external identity setup is not available.
+
 Current behavior:
-- SSO is required at launch.
-- Access is restricted to the domain set in `RAS_SSO_ALLOWED_DOMAIN`.
-- The app uses browser login when a tenant-managed Azure App Registration is configured.
-- If no browser SSO client ID is configured, the app falls back to Microsoft device sign-in.
+- Authentication is required at launch.
+- Access is restricted to approved domain users.
+
+### Credentials auth (zero-admin option)
+Use this when you do not have Entra app registration or outbound email setup.
+
+1. Set environment variables before launch:
+  - `RAS_AUTH_MODE=credentials`
+  - `RAS_AUTH_ALLOWED_DOMAIN=myridius.com`
+  - `RAS_AUTH_SESSION_MINUTES=60`
+  - Optional: `RAS_AUTH_MAX_ATTEMPTS=3`
+  - Optional: `RAS_AUTH_LOCKOUT_SECONDS=30`
+2. Provide hashed credentials either through:
+  - `RAS_CREDENTIALS_JSON={"user@myridius.com":"pbkdf2_sha256$260000$<salt_hex>$<hash_hex>"}`
+  - Streamlit secrets block:
+
+```toml
+[RAS_CREDENTIALS]
+"user@myridius.com" = "pbkdf2_sha256$260000$<salt_hex>$<hash_hex>"
+```
+
+3. Launch the app.
+4. Users sign in with their `@myridius.com` email and password.
+
+Password hash format:
+- `pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>`
+
+Example offline hash generation:
+
+```python
+import hashlib, os
+
+password = "change-me"
+iterations = 260000
+salt = os.urandom(16)
+digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+print(f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}")
+```
+
+### Microsoft SSO
+Use this when your tenant can support Microsoft sign-in setup.
 
 1. Set environment variables before launch:
   - `RAS_AUTH_MODE=sso`

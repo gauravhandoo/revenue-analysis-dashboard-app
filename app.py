@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import hashlib
+import hmac
 import os
 import time
 from pathlib import Path
@@ -59,12 +62,15 @@ APP_CACHE_VERSION = "2026-05-22-1"
 DATA_SOURCE_MODE = os.getenv("RAS_DATA_SOURCE", "local").strip().lower()
 AUTH_MODE = os.getenv("RAS_AUTH_MODE", "sso").strip().lower()
 AUTH_SESSION_MINUTES = int(os.getenv("RAS_AUTH_SESSION_MINUTES", "60"))
+CREDENTIALS_ALLOWED_DOMAIN = os.getenv("RAS_AUTH_ALLOWED_DOMAIN", "myridius.com").strip().lower()
+CREDENTIALS_MAX_ATTEMPTS = int(os.getenv("RAS_AUTH_MAX_ATTEMPTS", "3"))
+CREDENTIALS_LOCKOUT_SECONDS = int(os.getenv("RAS_AUTH_LOCKOUT_SECONDS", "30"))
 SSO_TENANT_ID = os.getenv("RAS_SSO_TENANT_ID", "organizations")
 SSO_FLOW_MODE = os.getenv("RAS_SSO_FLOW_MODE", "auto").strip().lower()
 SSO_CLIENT_ID = os.getenv("RAS_SSO_CLIENT_ID", "").strip()
 SSO_REDIRECT_URI = os.getenv("RAS_SSO_REDIRECT_URI", "https://revenue-analysis-rasi-0605.streamlit.app/").strip()
 SSO_DEVICE_CLIENT_ID = os.getenv("RAS_SSO_DEVICE_CLIENT_ID", "04b07795-8ddb-461a-bbee-02f9e1bf7b46").strip()
-SSO_ALLOWED_DOMAIN = os.getenv("RAS_SSO_ALLOWED_DOMAIN", "rcgglobalservices.com").strip().lower()
+SSO_ALLOWED_DOMAIN = os.getenv("RAS_SSO_ALLOWED_DOMAIN", CREDENTIALS_ALLOWED_DOMAIN).strip().lower()
 SSO_SCOPES = [scope.strip() for scope in os.getenv("RAS_SSO_SCOPES", "User.Read").split(",") if scope.strip()]
 
 FRIENDLY_HEADERS = {
@@ -122,6 +128,10 @@ def _logout_user() -> None:
         "auth_email",
         "auth_name",
         "auth_expires_at",
+        "credentials_email_input",
+        "credentials_password_input",
+        "credentials_failed_attempts",
+        "credentials_lockout_until",
         "sso_auth_code_flow",
         "sso_device_flow",
     ]:
@@ -153,6 +163,107 @@ def _extract_claim(claims: dict, *keys: str) -> str:
     return ""
 
 
+def _mark_authenticated(email: str, name: str) -> bool:
+    st.session_state["auth_ok"] = True
+    st.session_state["auth_email"] = email
+    st.session_state["auth_name"] = name
+    st.session_state["auth_expires_at"] = time.time() + (AUTH_SESSION_MINUTES * 60)
+    st.success(f"Signed in as {email}")
+    st.rerun()
+    return False
+
+
+def _get_credentials_store() -> dict[str, str]:
+    credentials: dict[str, str] = {}
+
+    raw_json = os.getenv("RAS_CREDENTIALS_JSON", "").strip()
+    if raw_json:
+        try:
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, dict):
+                for email, password_hash in parsed.items():
+                    if isinstance(email, str) and isinstance(password_hash, str):
+                        credentials[email.strip().lower()] = password_hash.strip()
+        except json.JSONDecodeError:
+            pass
+
+    try:
+        secret_credentials = st.secrets.get("RAS_CREDENTIALS", {})
+    except Exception:
+        secret_credentials = {}
+
+    if isinstance(secret_credentials, dict):
+        for email, password_hash in secret_credentials.items():
+            if isinstance(email, str) and isinstance(password_hash, str):
+                credentials[email.strip().lower()] = password_hash.strip()
+
+    return credentials
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        algorithm, iterations, salt_hex, hash_hex = stored_hash.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        derived_key = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations),
+        )
+        return hmac.compare_digest(derived_key.hex(), hash_hex)
+    except (TypeError, ValueError):
+        return False
+
+
+def _record_credentials_failure() -> None:
+    attempts = int(st.session_state.get("credentials_failed_attempts", 0)) + 1
+    st.session_state["credentials_failed_attempts"] = attempts
+    if attempts >= CREDENTIALS_MAX_ATTEMPTS:
+        st.session_state["credentials_lockout_until"] = time.time() + CREDENTIALS_LOCKOUT_SECONDS
+
+
+def _render_credentials_login_gate() -> bool:
+    st.subheader("Sign-in Required")
+    st.info("Please sign in with your myridius.com work email and password to access this dashboard.")
+
+    credentials_store = _get_credentials_store()
+    if not credentials_store:
+        st.error("Credentials auth is enabled but no credential hashes are configured.")
+        return False
+
+    lockout_until = float(st.session_state.get("credentials_lockout_until", 0.0) or 0.0)
+    if lockout_until > time.time():
+        remaining = max(1, int(lockout_until - time.time()))
+        st.warning(f"Too many failed sign-in attempts. Try again in {remaining} seconds.")
+        return False
+
+    email = st.text_input("Work Email", key="credentials_email_input", placeholder="name@myridius.com")
+    password = st.text_input("Password", type="password", key="credentials_password_input")
+
+    if not st.button("Sign In", type="primary", use_container_width=True):
+        return False
+
+    normalized_email = email.strip().lower()
+    if not normalized_email or not normalized_email.endswith(f"@{CREDENTIALS_ALLOWED_DOMAIN}"):
+        st.error(f"Only @{CREDENTIALS_ALLOWED_DOMAIN} accounts are allowed.")
+        return False
+
+    stored_hash = credentials_store.get(normalized_email, "")
+    if not stored_hash or not _verify_password(password, stored_hash):
+        _record_credentials_failure()
+        remaining_attempts = max(0, CREDENTIALS_MAX_ATTEMPTS - int(st.session_state.get("credentials_failed_attempts", 0)))
+        if remaining_attempts == 0:
+            st.error("Invalid credentials. Sign-in is temporarily locked.")
+        else:
+            st.error(f"Invalid credentials. {remaining_attempts} attempts remaining.")
+        return False
+
+    st.session_state.pop("credentials_failed_attempts", None)
+    st.session_state.pop("credentials_lockout_until", None)
+    return _mark_authenticated(normalized_email, normalized_email.split("@", 1)[0].replace(".", " ").title())
+
+
 def _complete_sso_result(result: dict) -> bool:
     if "access_token" not in result:
         description = result.get("error_description", "Sign-in was not completed.")
@@ -172,13 +283,7 @@ def _complete_sso_result(result: dict) -> bool:
         _logout_user()
         return False
 
-    st.session_state["auth_ok"] = True
-    st.session_state["auth_email"] = email
-    st.session_state["auth_name"] = name
-    st.session_state["auth_expires_at"] = time.time() + (AUTH_SESSION_MINUTES * 60)
-    st.success(f"Signed in as {email}")
-    st.rerun()
-    return False
+    return _mark_authenticated(email, name)
 
 
 def _render_browser_sso_login_gate() -> bool:
@@ -294,8 +399,19 @@ def _render_sso_login_gate() -> bool:
 
 
 def _enforce_authentication() -> bool:
+    if AUTH_MODE == "credentials":
+        if not CREDENTIALS_ALLOWED_DOMAIN:
+            st.error("RAS_AUTH_ALLOWED_DOMAIN must be configured to enforce organization-only access.")
+            return False
+
+        if _is_authenticated():
+            return True
+
+        _clear_auth_session()
+        return _render_credentials_login_gate()
+
     if AUTH_MODE != "sso":
-        st.error("Unsupported auth mode. Set RAS_AUTH_MODE to 'sso'.")
+        st.error("Unsupported auth mode. Set RAS_AUTH_MODE to 'credentials' or 'sso'.")
         return False
 
     if not SSO_ALLOWED_DOMAIN:
